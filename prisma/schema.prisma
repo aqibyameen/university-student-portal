@@ -1,0 +1,390 @@
+// University of Karachi Student Issue Management & Document Application System
+// Prisma Schema — PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  STAFF
+  ADMIN
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_STUDENT
+  RESOLVED
+  CLOSED
+  REJECTED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ApplicationStatus {
+  APPLICATION_SUBMITTED
+  WAITING_FOR_PAYMENT
+  PAYMENT_RECEIVED
+  UNDER_PROCESS
+  READY_FOR_COLLECTION
+  COMPLETED
+  REJECTED
+}
+
+enum ApplicationType {
+  PROFORMA
+  TRANSCRIPT
+}
+
+enum OfficeType {
+  REGISTRAR_OFFICE
+  SEMESTER_CELL
+}
+
+// ─── User (central auth entity) ───────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String?  @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  student        Student?
+  staffProfile   StaffProfile?
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  ticketRemarks  TicketRemark[]
+  appRemarks     ApplicationRemark[]
+  ticketStatusHistory  TicketStatusHistory[]
+  appStatusHistory     ApplicationStatusHistory[]
+  paymentReceipts      PaymentReceipt[]
+
+  @@map("users")
+}
+
+// ─── Student ──────────────────────────────────────────────────────────────────
+
+model Student {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  seatNumber String   @unique
+  fullName   String
+  email      String?
+  phone      String?
+  program    String
+  department String
+  semester   Int
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  tickets      Ticket[]
+  applications Application[]
+
+  @@index([seatNumber])
+  @@index([isActive])
+  @@map("students")
+}
+
+// ─── Department ───────────────────────────────────────────────────────────────
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  issues   Issue[]
+  tickets  Ticket[]
+  staff    StaffProfile[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("departments")
+}
+
+// ─── Issue ────────────────────────────────────────────────────────────────────
+
+model Issue {
+  id           String   @id @default(uuid())
+  departmentId String
+  name         String
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id])
+  tickets    Ticket[]
+
+  @@unique([departmentId, name])
+  @@index([departmentId])
+  @@index([isActive])
+  @@map("issues")
+}
+
+// ─── Staff Profile ────────────────────────────────────────────────────────────
+
+model StaffProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  departmentId String
+  fullName     String
+  employeeId   String   @unique
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@index([departmentId])
+  @@map("staff_profiles")
+}
+
+// ─── Refresh Token ────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+// ─── Ticket ───────────────────────────────────────────────────────────────────
+
+model Ticket {
+  id           String         @id @default(uuid())
+  ticketNumber String         @unique
+  studentId    String
+  departmentId String
+  issueId      String
+  description  String
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+
+  student    Student    @relation(fields: [studentId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+  issue      Issue      @relation(fields: [issueId], references: [id])
+
+  attachments   TicketAttachment[]
+  remarks       TicketRemark[]
+  statusHistory TicketStatusHistory[]
+
+  @@index([studentId])
+  @@index([departmentId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([departmentId, status])
+  @@map("tickets")
+}
+
+// ─── Ticket Attachment ────────────────────────────────────────────────────────
+
+model TicketAttachment {
+  id               String   @id @default(uuid())
+  ticketId         String
+  originalFilename String
+  storedFilename   String
+  mimeType         String
+  fileSize         Int
+  storagePath      String
+  createdAt        DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
+}
+
+// ─── Ticket Remark ────────────────────────────────────────────────────────────
+
+model TicketRemark {
+  id        String   @id @default(uuid())
+  ticketId  String
+  userId    String
+  remark    String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_remarks")
+}
+
+// ─── Ticket Status History ────────────────────────────────────────────────────
+
+model TicketStatusHistory {
+  id        String       @id @default(uuid())
+  ticketId  String
+  oldStatus TicketStatus?
+  newStatus TicketStatus
+  remark    String?
+  changedBy String
+  createdAt DateTime     @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  user   User   @relation(fields: [changedBy], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_status_history")
+}
+
+// ─── Application ──────────────────────────────────────────────────────────────
+
+model Application {
+  id                String            @id @default(uuid())
+  applicationNumber String            @unique
+  studentId         String
+  office            OfficeType
+  applicationType   ApplicationType
+  numberOfSemesters Int
+  purpose           String
+  notes             String?
+  baseFee           Decimal           @db.Decimal(10, 2)
+  perSemesterFee    Decimal           @db.Decimal(10, 2)
+  totalFee          Decimal           @db.Decimal(10, 2)
+  status            ApplicationStatus @default(APPLICATION_SUBMITTED)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  completedAt       DateTime?
+
+  student       Student                    @relation(fields: [studentId], references: [id])
+  receipt       PaymentReceipt?
+  statusHistory ApplicationStatusHistory[]
+  remarks       ApplicationRemark[]
+
+  @@index([studentId])
+  @@index([status])
+  @@index([applicationType])
+  @@index([office])
+  @@index([createdAt])
+  @@map("applications")
+}
+
+// ─── Application Status History ───────────────────────────────────────────────
+
+model ApplicationStatusHistory {
+  id            String            @id @default(uuid())
+  applicationId String
+  oldStatus     ApplicationStatus?
+  newStatus     ApplicationStatus
+  remark        String?
+  changedBy     String
+  createdAt     DateTime          @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+  user        User        @relation(fields: [changedBy], references: [id])
+
+  @@index([applicationId])
+  @@map("application_status_history")
+}
+
+// ─── Application Remark ───────────────────────────────────────────────────────
+
+model ApplicationRemark {
+  id            String   @id @default(uuid())
+  applicationId String
+  userId        String
+  remark        String
+  createdAt     DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@index([applicationId])
+  @@map("application_remarks")
+}
+
+// ─── Payment Receipt ──────────────────────────────────────────────────────────
+
+model PaymentReceipt {
+  id               String   @id @default(uuid())
+  applicationId    String   @unique
+  uploadedBy       String
+  originalFilename String
+  storedFilename   String
+  mimeType         String
+  fileSize         Int
+  storagePath      String
+  createdAt        DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+  uploader    User        @relation(fields: [uploadedBy], references: [id])
+
+  @@map("payment_receipts")
+}
+
+// ─── Fee Configuration ────────────────────────────────────────────────────────
+
+model FeeConfiguration {
+  id              String          @id @default(uuid())
+  applicationType ApplicationType
+  office          OfficeType
+  baseFee         Decimal         @db.Decimal(10, 2)
+  perSemesterFee  Decimal         @db.Decimal(10, 2)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([applicationType, office])
+  @@index([applicationType, office, isActive])
+  @@map("fee_configurations")
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
